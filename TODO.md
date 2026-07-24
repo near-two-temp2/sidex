@@ -51,6 +51,18 @@
 1. workbench 在 web 模式下解析 `workspaceUri` 的链路较深（workspace 服务 → configuration 服务 → FS provider），Phase 1 第 3 项验证不通过的话，需要在 boot 阶段自行解析 workspace 文件、把 folders 注入 workspaceProvider——仍然可行，工作量 +1 天左右。
 2. Rust 后端各命令（搜索/监听/Git）如果普遍硬编码了单根假设，Phase 3 的工作量会显著上涨；建议 Phase 1 做完先实测再评估。
 
+## 签名与分发（独立于 workspace，按需推进）
+
+现状：fork 构建为 ad-hoc 签名（`signingIdentity: "-"`），用户需 `xattr -cr` 或右键打开放行。
+
+- [ ] 短期（免费）：在 fork 发 GitHub Release，说明写成 curl 一键安装（curl 下载不带 quarantine 标记，双击即开）：
+      `curl -L -o ~/Downloads/SideX.dmg "<Release 直链>" && open ~/Downloads/SideX.dmg`
+- [ ] 长期（99 美元/年，如需对外正式分发）：注册 Apple Developer Program →
+  - [ ] 导出 Developer ID Application 证书 p12，连同 Apple ID 凭据存入 fork 的 GitHub secrets
+  - [ ] 把上游 release.yml 的签名步骤（Import Apple signing certificate / Unlock keychain）搬回 build-macos12.yml
+  - [ ] `tauri.macos12.conf.json` 的 `signingIdentity` 改为自己的证书名，并启用公证（APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID 环境变量，Tauri 自动走 notarytool）
+- 注意：绝不接受 app 内自动更新（指向官方 CDN，官方版在 macOS 12 上不可用）；正式分发前应在 fork 中禁用 updater 或换成自己的更新源
+
 ## 参考
 
 - 上游没有任何公开分支/PR 实现此功能（截至 2026-07-24 已核查全部 30 个 PR 与 2 个分支）
