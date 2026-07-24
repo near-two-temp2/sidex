@@ -1,0 +1,91 @@
+name: Build (macOS 12 compatible)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - macos12-support
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # Belt and suspenders: Tauri sets this from bundle.macOS.minimumSystemVersion,
+  # but exporting it here guarantees every cc/build-script invocation
+  # (bundled sqlite, tree-sitter, etc.) links for macOS 12 as well.
+  MACOSX_DEPLOYMENT_TARGET: "12.0"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-15-intel
+            target: x86_64-apple-darwin
+            artifact_name: macos12-x64
+
+          - platform: macos-15
+            target: aarch64-apple-darwin
+            artifact_name: macos12-arm64
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install create-dmg
+        run: |
+          brew install create-dmg
+          sudo ln -sf "$(which create-dmg)" /usr/local/bin/create-dmg
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Setup built-in extensions
+        shell: bash
+        run: bash scripts/setup-extensions.sh
+
+      - name: Build frontend
+        env:
+          NODE_OPTIONS: "--max-old-space-size=12288"
+        run: npm run build
+
+      - name: Build Tauri app (unsigned, min macOS 12.0)
+        timeout-minutes: 60
+        run: npx tauri build --target ${{ matrix.target }} --config src-tauri/tauri.macos12.conf.json
+
+      - name: Verify deployment target of produced binary
+        shell: bash
+        run: |
+          BIN=$(find target -path "*Contents/MacOS/SideX" -type f | head -1)
+          echo "Binary: $BIN"
+          otool -l "$BIN" | grep -B1 -A5 -E "LC_BUILD_VERSION|LC_VERSION_MIN_MACOSX"
+          echo "--- checking for objc_msgSend stubs (must be absent for macOS < 13) ---"
+          if nm -u "$BIN" | grep -q 'objc_msgSend\$'; then
+            echo "ERROR: binary uses objc_msgSend\$ stubs — will not run on macOS 12"
+            exit 1
+          fi
+          echo "OK: no objc_msgSend\$ stubs"
+
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          mkdir -p dist-artifacts
+          find target \( -name "*.dmg" -o -name "*.app.tar.gz" \) -exec cp {} dist-artifacts/ \; 2>/dev/null || true
+          ls -la dist-artifacts/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist-artifacts/
+          retention-days: 7
