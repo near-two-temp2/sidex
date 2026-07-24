@@ -19,6 +19,59 @@ async function sidexOpenFolder() {
 }
 (window as any).__sidex_openFolder = sidexOpenFolder;
 
+async function sidexOpenFolderGroup() {
+	try {
+		const { open } = await import('@tauri-apps/plugin-dialog');
+		const { URI } = await import('./vs/base/common/uri.js');
+		const selected = await open({ directory: true, multiple: true, title: 'Select folders for the group' });
+		const folders = Array.isArray(selected) ? selected : typeof selected === 'string' ? [selected] : [];
+		if (folders.length >= 1) {
+			const { invoke } = await import('@tauri-apps/api/core');
+			const groupPath = await invoke<string>('create_folder_group', { name: null, folders });
+			navigateToFolder(URI.file(groupPath).toString());
+		}
+	} catch (e) {
+		console.error('[SideX] Failed to open folder group:', e);
+		try {
+			const { message } = await import('@tauri-apps/plugin-dialog');
+			await message(String(e), { title: 'Open Folder Group', kind: 'error' });
+		} catch (_) {}
+	}
+}
+(window as any).__sidex_openFolderGroup = sidexOpenFolderGroup;
+
+async function sidexAddFolderToWindow() {
+	const folderParam = new URLSearchParams(window.location.search).get('folder');
+	if (!folderParam) {
+		await sidexOpenFolderGroup();
+		return;
+	}
+	try {
+		const { open } = await import('@tauri-apps/plugin-dialog');
+		const { URI } = await import('./vs/base/common/uri.js');
+		// Links can only be created on the local filesystem; for non-file roots
+		// (vscode-remote, vscode-vfs) fsPath would yield a misleading local path.
+		const parsed = URI.parse(folderParam);
+		if (parsed.scheme !== 'file') {
+			await sidexOpenFolderGroup();
+			return;
+		}
+		const selected = await open({ directory: true, multiple: true, title: 'Select folders for the group' });
+		const folders = Array.isArray(selected) ? selected : typeof selected === 'string' ? [selected] : [];
+		if (folders.length >= 1) {
+			const { invoke } = await import('@tauri-apps/api/core');
+			await invoke('add_folder_links', { destRoot: parsed.fsPath, folders });
+		}
+	} catch (e) {
+		console.error('[SideX] Failed to add folders to window:', e);
+		try {
+			const { message } = await import('@tauri-apps/plugin-dialog');
+			await message(String(e), { title: 'Add Folder to Window', kind: 'error' });
+		} catch (_) {}
+	}
+}
+(window as any).__sidex_addFolderToWindow = sidexAddFolderToWindow;
+
 function navigateToFolder(folderUri: string) {
 	const url = new URL(window.location.href);
 	url.searchParams.set('folder', folderUri);
@@ -387,6 +440,16 @@ function setupMenuActions() {
 	(window as any).__sidex_menu_action = async (menuId: string) => {
 		if (menuId === 'open_folder') {
 			sidexOpenFolder();
+			return;
+		}
+
+		if (menuId === 'open_folder_group') {
+			sidexOpenFolderGroup();
+			return;
+		}
+
+		if (menuId === 'add_folder_to_window') {
+			sidexAddFolderToWindow();
 			return;
 		}
 

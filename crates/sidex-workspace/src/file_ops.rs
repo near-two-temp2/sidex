@@ -119,13 +119,25 @@ pub fn rename(from: &Path, to: &Path) -> WorkspaceResult<()> {
 }
 
 /// Remove a file or directory. When `recursive` is true, removes non-empty directories.
+/// Symlinks (and Windows junctions) are unlinked without following, so deleting a
+/// link never touches the target and broken links remain deletable.
 pub fn remove(path: &Path, recursive: bool) -> WorkspaceResult<()> {
-    let meta = fs::metadata(path).map_err(|e| WorkspaceError::Io {
+    let meta = fs::symlink_metadata(path).map_err(|e| WorkspaceError::Io {
         path: path.to_path_buf(),
         source: e,
     })?;
 
-    if meta.is_dir() {
+    if meta.file_type().is_symlink() {
+        #[cfg(windows)]
+        let op = if fs::remove_dir(path).is_ok() {
+            Ok(())
+        } else {
+            fs::remove_file(path)
+        };
+        #[cfg(not(windows))]
+        let op = fs::remove_file(path);
+        op
+    } else if meta.is_dir() {
         if recursive {
             fs::remove_dir_all(path)
         } else {
@@ -200,6 +212,18 @@ pub fn read_dir(path: &Path) -> WorkspaceResult<Vec<DirEntry>> {
             source: e,
         })?;
 
+        // `file_type`/`metadata` do not traverse symlinks (junctions included),
+        // so a linked directory would report `is_dir: false` and render as an
+        // unopenable file. Follow the link for is_dir/is_file; a broken link
+        // (target missing) reports neither, so it still lists.
+        let (is_dir, is_file) = if file_type.is_symlink() {
+            fs::metadata(entry.path())
+                .map(|m| (m.is_dir(), m.is_file()))
+                .unwrap_or((false, false))
+        } else {
+            (file_type.is_dir(), file_type.is_file())
+        };
+
         let modified = metadata
             .modified()
             .ok()
@@ -209,8 +233,8 @@ pub fn read_dir(path: &Path) -> WorkspaceResult<Vec<DirEntry>> {
         result.push(DirEntry {
             name: entry.file_name().to_string_lossy().to_string(),
             path: entry.path().to_string_lossy().to_string(),
-            is_dir: file_type.is_dir(),
-            is_file: file_type.is_file(),
+            is_dir,
+            is_file,
             is_symlink: file_type.is_symlink(),
             size: metadata.len(),
             modified,
@@ -247,12 +271,22 @@ pub fn stat(path: &Path) -> WorkspaceResult<FileStat> {
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
         .map_or(0, |d| d.as_secs());
 
+    // As in `read_dir`: follow symlinks so linked directories stat as
+    // directories; a broken link reports neither dir nor file.
+    let (is_dir, is_file) = if meta.file_type().is_symlink() {
+        fs::metadata(path)
+            .map(|m| (m.is_dir(), m.is_file()))
+            .unwrap_or((false, false))
+    } else {
+        (meta.is_dir(), meta.file_type().is_file())
+    };
+
     Ok(FileStat {
         size: meta.len(),
         modified,
         created,
-        is_dir: meta.is_dir(),
-        is_file: meta.file_type().is_file(),
+        is_dir,
+        is_file,
         is_symlink: meta.file_type().is_symlink(),
         readonly: meta.permissions().readonly(),
     })
@@ -377,6 +411,43 @@ mod tests {
         write_file(&src, "content").unwrap();
         copy_file(&src, &dst).unwrap();
         assert_eq!(read_file(&dst).unwrap(), "content");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn symlinked_dir_reports_dir_and_unlinks_without_following() {
+        let tmp = TempDir::new().unwrap();
+        let target = tmp.path().join("target");
+        mkdir(&target, false).unwrap();
+        write_file(&target.join("inner.txt"), "keep me").unwrap();
+        let link = tmp.path().join("link");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        let s = stat(&link).unwrap();
+        assert!(s.is_dir, "linked directory stats as a directory");
+        assert!(s.is_symlink);
+
+        let entry = read_dir(tmp.path())
+            .unwrap()
+            .into_iter()
+            .find(|e| e.name == "link")
+            .unwrap();
+        assert!(entry.is_dir && entry.is_symlink);
+
+        remove(&link, true).unwrap();
+        assert!(!exists(&link));
+        assert!(target.join("inner.txt").exists(), "target untouched");
+
+        // Broken link: still listed and still deletable.
+        std::os::unix::fs::symlink(tmp.path().join("gone"), &link).unwrap();
+        let entry = read_dir(tmp.path())
+            .unwrap()
+            .into_iter()
+            .find(|e| e.name == "link")
+            .unwrap();
+        assert!(!entry.is_dir && !entry.is_file && entry.is_symlink);
+        remove(&link, true).unwrap();
+        assert!(link.symlink_metadata().is_err());
     }
 
     #[test]

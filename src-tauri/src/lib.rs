@@ -43,6 +43,11 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
                 .build(app)?,
         )
         .item(&MenuItemBuilder::with_id("open_folder", "Open Folder...").build(app)?)
+        .item(&MenuItemBuilder::with_id("open_folder_group", "Open Folder Group...").build(app)?)
+        .item(
+            &MenuItemBuilder::with_id("add_folder_to_window", "Add Folder to Window...")
+                .build(app)?,
+        )
         .item(&MenuItemBuilder::with_id("open_recent", "Open Recent").build(app)?)
         .separator()
         .item(
@@ -530,6 +535,9 @@ pub fn run() {
             commands::remove,
             commands::rename,
             commands::exists,
+            // Folder groups
+            commands::create_folder_group,
+            commands::add_folder_links,
             // Path operations
             commands::parse_path,
             commands::join_paths,

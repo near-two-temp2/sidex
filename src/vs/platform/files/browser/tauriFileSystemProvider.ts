@@ -138,10 +138,13 @@ export class TauriFileSystemProvider extends Disposable implements IFileSystemPr
 		let type: FileType;
 		if (raw.is_dir) {
 			type = FileType.Directory;
-		} else if (raw.is_symlink) {
-			type = FileType.SymbolicLink;
-		} else {
+		} else if (raw.is_file) {
 			type = FileType.File;
+		} else {
+			type = FileType.Unknown;
+		}
+		if (raw.is_symlink) {
+			type |= FileType.SymbolicLink;
 		}
 
 		return {
@@ -171,10 +174,13 @@ export class TauriFileSystemProvider extends Disposable implements IFileSystemPr
 			let ft: FileType;
 			if (e.is_dir) {
 				ft = FileType.Directory;
-			} else if (e.is_symlink) {
-				ft = FileType.SymbolicLink;
-			} else {
+			} else if (e.is_file) {
 				ft = FileType.File;
+			} else {
+				ft = FileType.Unknown;
+			}
+			if (e.is_symlink) {
+				ft |= FileType.SymbolicLink;
 			}
 			return [e.name, ft] as [string, FileType];
 		});
