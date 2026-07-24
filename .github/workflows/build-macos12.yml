@@ -12,6 +12,9 @@ env:
   # but exporting it here guarantees every cc/build-script invocation
   # (bundled sqlite, tree-sitter, etc.) links for macOS 12 as well.
   MACOSX_DEPLOYMENT_TARGET: "12.0"
+  # Lower the Vite/esbuild target so the JS bundle parses on macOS 12's
+  # WebKit (Safari 15.x era JSC rejects some newer syntax).
+  SIDEX_LEGACY_WEBKIT: "1"
 
 jobs:
   build:

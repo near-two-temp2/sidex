@@ -20,6 +20,12 @@ function quietMissingSourceMaps() {
   };
 }
 
+// macOS 12 ships WebKit builds ranging from Safari 15.0 to 17.6 depending on
+// system updates; its JSC rejects some syntax that newer engines accept.
+// SIDEX_LEGACY_WEBKIT=1 lowers the build target so esbuild transpiles
+// class fields, private methods, static blocks and modern regex literals.
+const legacyWebKit = process.env.SIDEX_LEGACY_WEBKIT === '1';
+
 export default defineConfig({
   clearScreen: false,
   assetsInclude: ['**/*.wasm', '**/*.json', '**/*.tmLanguage.json'],
@@ -39,7 +45,7 @@ export default defineConfig({
     },
   },
   build: {
-    target: ['es2022', 'chrome100', 'safari15'],
+    target: legacyWebKit ? ['es2020', 'safari14'] : ['es2022', 'chrome100', 'safari15'],
     minify: 'esbuild',
     sourcemap: false,
     cssCodeSplit: true,
