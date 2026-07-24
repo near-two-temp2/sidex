@@ -26,10 +26,6 @@ jobs:
             target: x86_64-apple-darwin
             artifact_name: macos12-x64
 
-          - platform: macos-15
-            target: aarch64-apple-darwin
-            artifact_name: macos12-arm64
-
     runs-on: ${{ matrix.platform }}
 
     steps:
